@@ -1,0 +1,114 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Reflection;
+using Sdl.Web.Common;
+using Sdl.Web.Common.Configuration;
+using Sdl.Web.Common.Extensions;
+using Sdl.Web.Common.Interfaces;
+using Sdl.Web.Common.Logging;
+using Sdl.Web.Common.Mapping;
+using Sdl.Web.Common.Models;
+using Sdl.Web.Common.Models.Navigation;
+using Sdl.Web.DataModel;
+using Sdl.Web.Tridion.ContentManager;
+using MvcData = Sdl.Web.Common.Models.MvcData;
+using Sdl.Web.Modules.Core.Models;
+
+
+
+
+namespace Navient.Corporate.Module
+{
+    public class CustomModelBuilder : Sdl.Web.Tridion.Mapping.DefaultModelBuilder
+    {
+
+        override public void BuildEntityModel(ref EntityModel entityModel, EntityModelData entityModelData, Type baseModelType, Localization localization)
+        {
+            using (new Tracer(entityModel, entityModelData, baseModelType, localization))
+            {
+                MvcData mvcData = CreateMvcData(entityModelData.MvcData, "Entity");
+                SemanticSchema semanticSchema = SemanticMapping.GetSchema(entityModelData.SchemaId, localization);
+
+                Type modelType = (baseModelType == null) ?
+                    ModelTypeRegistry.GetViewModelType(mvcData) :
+                    semanticSchema.GetModelTypeFromSemanticMapping(baseModelType);
+
+                MappingData mappingData = new MappingData
+                {
+                    SourceViewModel = entityModelData,
+                    ModelType = modelType,
+                    PropertyValidation = new Validation
+                    {
+                        MainSchema = semanticSchema,
+                        InheritedSchemas = GetInheritedSemanticSchemas(entityModelData, localization)
+                    },
+                    Fields = entityModelData.Content,
+                    MetadataFields = entityModelData.Metadata,
+                    Localization = localization
+                };
+
+                entityModel = (EntityModel)CreateViewModel(mappingData);
+
+                entityModel.Id = entityModelData.Id;
+                if (localization.IsXpmEnabled)
+                {
+                    entityModel.XpmMetadata = mappingData.Localization.IsXpmEnabled ? entityModelData.XpmMetadata : null;
+                }
+
+                MediaItem mediaItem = entityModel as MediaItem;
+                if (mediaItem != null)
+                {
+                    BinaryContentData binaryContent = entityModelData?.BinaryContent;
+                    if (binaryContent == null)
+                    {
+                        throw new DxaException(
+                            $"Unable to create Media Item ('{mappingData.ModelType.Name}') because the Data Model '{entityModelData?.Id}' does not contain Binary Content Data."
+                            );
+                    }
+                    mediaItem.Url = binaryContent.Url;
+                    mediaItem.FileName = binaryContent.FileName;
+                    mediaItem.MimeType = binaryContent.MimeType;
+                    mediaItem.FileSize = binaryContent.FileSize;
+                }
+
+                EclItem eclItem = entityModel as EclItem;
+                if (eclItem != null)
+                {
+                    ExternalContentData externalContent = entityModelData.ExternalContent;
+                    if (externalContent == null)
+                    {
+                        throw new DxaException(
+                            $"Unable to create ECL Item ('{mappingData.ModelType.Name}') because the Data Model '{entityModelData.Id}' does not contain External Content Data."
+                            );
+                    }
+                    eclItem.EclDisplayTypeId = externalContent.DisplayTypeId;
+                    eclItem.EclTemplateFragment = externalContent.TemplateFragment;
+                    eclItem.EclExternalMetadata = externalContent.Metadata;
+                    eclItem.EclUri = externalContent.Id;
+                }
+
+                if (entityModel is YouTubeVideo)
+                {
+                    YouTubeVideo mediaItem1 = (YouTubeVideo)entityModel;
+                    mediaItem1.Url =entityModelData.BinaryContent.Url;
+                }
+
+                if (entityModel is Link)
+                {
+                    Link link = (Link)entityModel;
+                    if (String.IsNullOrEmpty(link.Url))
+                    {
+                        link.Url = SiteConfiguration.LinkResolver.ResolveLink(entityModelData.Id);
+                    }
+                }
+
+                entityModel.MvcData = mvcData ?? entityModel.GetDefaultView(localization);
+            }
+        }
+
+
+    }
+}
